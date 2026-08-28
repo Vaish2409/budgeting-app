@@ -8,24 +8,42 @@ function rowToCategory(row: any): Category {
   return { ...row, isDefault: !!row.isDefault };
 }
 
-/** Seeds the default category list + starter merchant keyword rules, once. */
+/**
+ * Seeds the default category list, once, then (re)seeds starter merchant
+ * keyword rules on every startup. The keyword list in DEFAULT_MERCHANT_KEYWORDS
+ * grows over time (FR18); re-running this each launch — via INSERT OR IGNORE,
+ * keyed on merchantPattern — lets newly-added keywords reach installs that
+ * already seeded categories, without touching rows a user has since edited
+ * (setMerchantRule's UPSERT is the only thing allowed to overwrite those).
+ */
 export async function seedDefaultCategories(db: SQLiteDatabase): Promise<void> {
   const existing = await db.getFirstAsync<{ count: number }>(
     "SELECT COUNT(*) as count FROM categories"
   );
-  if (existing && existing.count > 0) return;
 
+  if (!existing || existing.count === 0) {
+    await db.withTransactionAsync(async () => {
+      for (const cat of DEFAULT_CATEGORIES) {
+        const id = generateId();
+        await db.runAsync(
+          `INSERT INTO categories (id, name, color, icon, isDefault, sortOrder) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, cat.name, cat.color, cat.icon, cat.isDefault ? 1 : 0, cat.sortOrder]
+        );
+      }
+    });
+  }
+
+  await seedDefaultMerchantKeywords(db);
+}
+
+async function seedDefaultMerchantKeywords(db: SQLiteDatabase): Promise<void> {
+  const categories = await db.getAllAsync<{ id: string; name: string }>(
+    "SELECT id, name FROM categories"
+  );
   const nameToId: Record<string, string> = {};
+  for (const cat of categories) nameToId[cat.name] = cat.id;
 
   await db.withTransactionAsync(async () => {
-    for (const cat of DEFAULT_CATEGORIES) {
-      const id = generateId();
-      nameToId[cat.name] = id;
-      await db.runAsync(
-        `INSERT INTO categories (id, name, color, icon, isDefault, sortOrder) VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, cat.name, cat.color, cat.icon, cat.isDefault ? 1 : 0, cat.sortOrder]
-      );
-    }
     for (const [keyword, categoryName] of Object.entries(DEFAULT_MERCHANT_KEYWORDS)) {
       const categoryId = nameToId[categoryName];
       if (!categoryId) continue;

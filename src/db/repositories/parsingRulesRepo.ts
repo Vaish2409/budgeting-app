@@ -18,8 +18,8 @@ export async function createParsingRule(input: Omit<ParsingRule, "id">): Promise
   await db.runAsync(
     `INSERT INTO parsing_rules
       (id, bankIdentifier, senderMatch, isTransactionPattern, isNonTransactionPattern,
-       amountPattern, currencyPattern, debitCreditPattern, merchantPattern, lastFourPattern, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       amountPattern, currencyPattern, debitCreditPattern, merchantPattern, lastFourPattern, spender, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.bankIdentifier,
@@ -31,6 +31,7 @@ export async function createParsingRule(input: Omit<ParsingRule, "id">): Promise
       input.debitCreditPattern,
       input.merchantPattern,
       input.lastFourPattern,
+      input.spender,
       input.enabled ? 1 : 0,
     ]
   );

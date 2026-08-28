@@ -73,8 +73,8 @@ export async function createTransaction(
   await db.runAsync(
     `INSERT INTO transactions
       (id, date, originalAmountMinor, originalCurrency, baseAmountMinor, fxRateUsed,
-       merchant, bankSource, categoryId, note, sourceType, sourceMessageId, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       merchant, bankSource, categoryId, note, sourceType, sourceMessageId, spender, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.date,
@@ -88,6 +88,7 @@ export async function createTransaction(
       input.note,
       input.sourceType,
       input.sourceMessageId,
+      input.spender,
       now,
       now,
     ]

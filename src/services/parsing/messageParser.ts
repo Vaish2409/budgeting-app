@@ -9,6 +9,7 @@ export interface ParsedMessage {
   merchant: string | null;
   lastFour: string | null;
   bankIdentifier: string;
+  spender: string | null; // from the matched rule's `spender` field
 }
 
 export type ParseResult =
@@ -16,33 +17,23 @@ export type ParseResult =
   | { status: "not_a_transaction" } // FR7 — OTPs, promos, balance checks
   | { status: "no_matching_rule" }; // sender didn't match any configured bank
 
-/**
- * Parses a forwarded bank message against the user's configured ParsingRules
- * (NFR section 7 — config-driven, not hardcoded per bank). Rules are matched
- * by sender first, then the message body is tested against that rule's patterns.
- */
-export function parseMessage(
-  sender: string,
-  subject: string,
-  body: string,
-  rules: ParsingRule[]
-): ParseResult {
-  const text = `${subject}\n${body}`;
-  const rule = rules.find((r) => r.enabled && sender.toLowerCase().includes(r.senderMatch.toLowerCase()));
+type RuleAttempt =
+  | { kind: "parsed"; data: ParsedMessage }
+  | { kind: "excluded" } // rule explicitly recognized this as a non-transaction (OTP, promo, etc.)
+  | { kind: "no_match" }; // this rule just doesn't apply — caller should try the next candidate
 
-  if (!rule) return { status: "no_matching_rule" };
-
+function tryRule(rule: ParsingRule, text: string): RuleAttempt {
   if (rule.isNonTransactionPattern && new RegExp(rule.isNonTransactionPattern, "i").test(text)) {
-    return { status: "not_a_transaction" };
+    return { kind: "excluded" };
   }
   if (!new RegExp(rule.isTransactionPattern, "i").test(text)) {
-    return { status: "not_a_transaction" };
+    return { kind: "no_match" };
   }
 
   const amountMatch = text.match(new RegExp(rule.amountPattern, "i"));
-  if (!amountMatch || !amountMatch[1]) return { status: "not_a_transaction" };
+  if (!amountMatch || !amountMatch[1]) return { kind: "no_match" };
   const rawAmount = parseFloat(amountMatch[1].replace(/,/g, ""));
-  if (Number.isNaN(rawAmount)) return { status: "not_a_transaction" };
+  if (Number.isNaN(rawAmount)) return { kind: "no_match" };
 
   let currency: string | null = null;
   if (rule.currencyPattern) {
@@ -50,7 +41,7 @@ export function parseMessage(
     currency = currencyMatch?.[1]?.toUpperCase() ?? null;
   }
   if (!currency) currency = detectCurrency(text);
-  if (!currency) return { status: "not_a_transaction" };
+  if (!currency) return { kind: "no_match" };
 
   let isDebit = true;
   if (rule.debitCreditPattern) {
@@ -73,7 +64,7 @@ export function parseMessage(
   }
 
   return {
-    status: "parsed",
+    kind: "parsed",
     data: {
       amountMinor: toMinorUnits(rawAmount, currency),
       currency,
@@ -81,6 +72,39 @@ export function parseMessage(
       merchant,
       lastFour,
       bankIdentifier: rule.bankIdentifier,
+      spender: rule.spender,
     },
   };
+}
+
+/**
+ * Parses a forwarded bank message against the user's configured ParsingRules
+ * (NFR section 7 — config-driven, not hardcoded per bank). Rules are matched
+ * by sender first; every enabled rule whose senderMatch fits is then tried in
+ * order until one recognizes the message. This matters because messages are
+ * typically relayed by a single phone-level "forward to Gmail" automation
+ * (see docs/gmail-setup.md's SMS-forwarding setup), so every bank's alerts
+ * usually share one sender — the phone's own Mail account, not the bank. A
+ * single-bank sender domain (if the user forwards straight from the bank)
+ * still works fine here, since there's then just one matching rule to try.
+ */
+export function parseMessage(
+  sender: string,
+  subject: string,
+  body: string,
+  rules: ParsingRule[]
+): ParseResult {
+  const text = `${subject}\n${body}`;
+  const candidates = rules.filter(
+    (r) => r.enabled && sender.toLowerCase().includes(r.senderMatch.toLowerCase())
+  );
+  if (candidates.length === 0) return { status: "no_matching_rule" };
+
+  for (const rule of candidates) {
+    const attempt = tryRule(rule, text);
+    if (attempt.kind === "parsed") return { status: "parsed", data: attempt.data };
+    if (attempt.kind === "excluded") return { status: "not_a_transaction" };
+    // "no_match" — fall through and try the next candidate rule.
+  }
+  return { status: "not_a_transaction" };
 }

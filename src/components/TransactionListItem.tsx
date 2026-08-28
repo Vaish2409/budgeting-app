@@ -24,6 +24,7 @@ export default function TransactionListItem({ transaction, category, baseCurrenc
         <Text style={styles.meta} numberOfLines={1}>
           {category?.name ?? "Uncategorized"} · {new Date(transaction.date).toLocaleDateString()}
           {transaction.sourceType === "manual" ? " · manual" : ""}
+          {transaction.spender ? ` · ${transaction.spender}` : ""}
         </Text>
       </View>
       <View style={styles.amounts}>

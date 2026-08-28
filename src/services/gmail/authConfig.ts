@@ -36,8 +36,10 @@
  * This module requires a custom dev client — it cannot run inside plain Expo Go
  * (`npx expo prebuild` then `npx expo run:ios` / `npx expo run:android`).
  */
-export const GOOGLE_WEB_CLIENT_ID = "REPLACE_WITH_WEB_CLIENT_ID.apps.googleusercontent.com";
-export const GOOGLE_IOS_CLIENT_ID = "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com";
+export const GOOGLE_WEB_CLIENT_ID =
+  "637136433143-r6tn95i7jrstsfbukdbqhvsgl1hktdnb.apps.googleusercontent.com";
+export const GOOGLE_IOS_CLIENT_ID =
+  "637136433143-f71hrqk81n7h9mfei9cb50g3jc0a2gj2.apps.googleusercontent.com";
 
 /**
  * gmail.modify (not just readonly) is required so the app can archive/label

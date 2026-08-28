@@ -79,6 +79,14 @@ const MIGRATIONS: string[] = [
     value TEXT
   );
   `,
+
+  // v2 — per-rule/per-transaction "spender" label, so households sharing one
+  // dedicated inbox across multiple phones (each forwarding under its own
+  // personal address) can tell whose spend is whose.
+  `
+  ALTER TABLE parsing_rules ADD COLUMN spender TEXT;
+  ALTER TABLE transactions ADD COLUMN spender TEXT;
+  `,
 ];
 
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {

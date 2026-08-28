@@ -19,6 +19,7 @@ export interface Transaction {
   note: string | null;
   sourceType: SourceType;
   sourceMessageId: string | null; // Gmail message id, for dedupe (FR8); null for manual
+  spender: string | null; // whose spend this is, from the ParsingRule that matched (e.g. "Badri"); null for manual entries
   createdAt: string;
   updatedAt: string;
 }
@@ -71,5 +72,6 @@ export interface ParsingRule {
   debitCreditPattern: string | null; // regex distinguishing debit vs. credit
   merchantPattern: string | null; // regex with a capture group for merchant/payee
   lastFourPattern: string | null; // regex with a capture group for account last 4 digits
+  spender: string | null; // whose spend messages matching this rule should be attributed to (e.g. "Badri")
   enabled: boolean;
 }

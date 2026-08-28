@@ -83,6 +83,7 @@ export async function pollAndImport(): Promise<IngestionResult> {
         note: null,
         sourceType: "auto",
         sourceMessageId: summary.id,
+        spender: data.spender,
       });
 
       await markProcessed(summary.id);

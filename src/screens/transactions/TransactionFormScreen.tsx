@@ -109,6 +109,7 @@ export default function TransactionFormScreen() {
           note: note.trim() || null,
           sourceType: "manual",
           sourceMessageId: null,
+          spender: null,
         });
       }
       navigation.goBack();
