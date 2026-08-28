@@ -1,69 +1,74 @@
-import { useEffect, useState } from "react";
-import * as AuthSession from "expo-auth-session";
-import * as WebBrowser from "expo-web-browser";
-import { Platform } from "react-native";
-import { GOOGLE_OAUTH_CLIENT_ID, GMAIL_SCOPES, GOOGLE_DISCOVERY } from "./authConfig";
-import { saveTokens, clearTokens, loadTokens, StoredTokens } from "./tokenStore";
+import { useCallback, useEffect, useState } from "react";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GMAIL_SCOPES } from "./authConfig";
+import { saveTokens, loadTokens, clearTokens, StoredTokens } from "./tokenStore";
 
-WebBrowser.maybeCompleteAuthSession();
+// Google access tokens are conventionally valid ~1 hour; refresh a bit early.
+const TOKEN_LIFETIME_MS = 55 * 60 * 1000;
+
+let isConfigured = false;
+function ensureConfigured() {
+  if (isConfigured) return;
+  GoogleSignin.configure({
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    offlineAccess: false, // no backend — the app itself polls while it holds a live session
+    scopes: GMAIL_SCOPES, // requested up front so signIn() itself covers Gmail access
+  });
+  isConfigured = true;
+}
 
 /**
- * Drives the Google OAuth PKCE flow (FR2 / section 4.2). No client secret is
- * used or needed — expo-auth-session generates the PKCE code verifier/challenge
- * and the redirect is handled by the app's own scheme (see app.json "scheme").
+ * Reads the accessToken off getTokens(), guarding against the empty-string
+ * case some Android builds of this library are known to return for it (see
+ * open issues against @react-native-google-signin/google-signin — unverified
+ * on-device in this environment; flagged in docs/gmail-setup.md).
+ */
+async function fetchAccessToken(): Promise<string> {
+  const { accessToken } = await GoogleSignin.getTokens();
+  if (!accessToken) {
+    throw new Error(
+      "Google Sign-In returned no access token. This is a known issue on some Android " +
+        "builds of @react-native-google-signin/google-signin — see docs/gmail-setup.md " +
+        "for the fallback if this happens on your device."
+    );
+  }
+  return accessToken;
+}
+
+/**
+ * Drives Google sign-in + Gmail authorization (FR2 / section 4.2). The Gmail
+ * scope is requested up front via configure({ scopes }), so a single signIn()
+ * covers both identity and Gmail access — getTokens() afterward returns an
+ * access token already carrying that scope.
  */
 export function useGoogleAuth() {
   const [tokens, setTokens] = useState<StoredTokens | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: "budgettracker" });
-  const clientId = Platform.OS === "ios" ? GOOGLE_OAUTH_CLIENT_ID.ios : GOOGLE_OAUTH_CLIENT_ID.android;
-
-  const [request, , promptAsync] = AuthSession.useAuthRequest(
-    {
-      clientId,
-      scopes: GMAIL_SCOPES,
-      redirectUri,
-      responseType: AuthSession.ResponseType.Code,
-      usePKCE: true,
-      extraParams: { access_type: "offline", prompt: "consent" },
-    },
-    GOOGLE_DISCOVERY
-  );
-
   useEffect(() => {
+    ensureConfigured();
     loadTokens().then(setTokens);
   }, []);
 
-  async function connect(): Promise<boolean> {
+  const connect = useCallback(async (): Promise<boolean> => {
+    ensureConfigured();
     setError(null);
     setIsConnecting(true);
     try {
-      if (!request) {
-        setError("Auth request not ready yet — try again in a moment.");
-        return false;
-      }
-      const result = await promptAsync();
-      if (result.type !== "success" || !result.params.code) {
-        if (result.type !== "cancel") setError("Google sign-in did not complete.");
-        return false;
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      const signInResult = await GoogleSignin.signIn();
+      if (signInResult.type !== "success") {
+        return false; // user cancelled
       }
 
-      const exchanged = await AuthSession.exchangeCodeAsync(
-        {
-          clientId,
-          code: result.params.code,
-          redirectUri,
-          extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
-        },
-        GOOGLE_DISCOVERY
-      );
-
+      const accessToken = await fetchAccessToken();
       const newTokens: StoredTokens = {
-        accessToken: exchanged.accessToken,
-        refreshToken: exchanged.refreshToken ?? null,
-        expiresAt: Date.now() + (exchanged.expiresIn ?? 3600) * 1000,
+        accessToken,
+        expiresAt: Date.now() + TOKEN_LIFETIME_MS,
+        connectedEmail: signInResult.data.user.email,
       };
       await saveTokens(newTokens);
       setTokens(newTokens);
@@ -74,40 +79,48 @@ export function useGoogleAuth() {
     } finally {
       setIsConnecting(false);
     }
-  }
+  }, []);
 
-  async function disconnect(): Promise<void> {
+  const disconnect = useCallback(async () => {
+    try {
+      await GoogleSignin.revokeAccess();
+      await GoogleSignin.signOut();
+    } catch {
+      // already signed out on the native side — fine, just clear our local copy
+    }
     await clearTokens();
     setTokens(null);
-  }
+  }, []);
 
   return { tokens, isConnected: !!tokens, isConnecting, error, connect, disconnect };
 }
 
 /**
- * Returns a valid access token, refreshing it first if it's expired or about
- * to expire. Call this before every Gmail API request rather than reading
- * the stored token directly.
+ * Returns a valid Gmail access token, silently re-signing-in first if the
+ * cached one is expired or about to expire. signInSilently() restores the
+ * session without prompting the user, so this should never interrupt a
+ * background poll (FR5) with a UI prompt. Returns null if there's no prior
+ * grant to restore from, meaning the caller should prompt the user to
+ * reconnect from Settings.
  */
 export async function getValidAccessToken(): Promise<string | null> {
-  const tokens = await loadTokens();
-  if (!tokens) return null;
+  ensureConfigured();
+  const cached = await loadTokens();
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.accessToken;
+  }
 
-  const isExpiringSoon = Date.now() > tokens.expiresAt - 60_000;
-  if (!isExpiringSoon) return tokens.accessToken;
-
-  if (!tokens.refreshToken) return null;
-
-  const clientId = Platform.OS === "ios" ? GOOGLE_OAUTH_CLIENT_ID.ios : GOOGLE_OAUTH_CLIENT_ID.android;
   try {
-    const refreshed = await AuthSession.refreshAsync(
-      { clientId, refreshToken: tokens.refreshToken },
-      GOOGLE_DISCOVERY
-    );
+    if (!GoogleSignin.hasPreviousSignIn()) return null;
+
+    const silentResult = await GoogleSignin.signInSilently();
+    if (silentResult.type !== "success") return null;
+
+    const accessToken = await fetchAccessToken();
     const newTokens: StoredTokens = {
-      accessToken: refreshed.accessToken,
-      refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-      expiresAt: Date.now() + (refreshed.expiresIn ?? 3600) * 1000,
+      accessToken,
+      expiresAt: Date.now() + TOKEN_LIFETIME_MS,
+      connectedEmail: cached?.connectedEmail ?? silentResult.data.user.email,
     };
     await saveTokens(newTokens);
     return newTokens.accessToken;

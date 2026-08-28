@@ -16,20 +16,25 @@ in this environment — see "Known gaps" below.
 
 ## Running it
 
+Because of the Gmail sign-in library (see below), this needs a custom dev client — plain Expo Go
+won't work:
+
 ```bash
 npm install
-npx expo start
+npx expo prebuild
+npx expo run:ios      # or: npx expo run:android
 ```
 
-Then press `i` for iOS simulator or `a` for Android emulator, or scan the QR code with Expo Go on
-a physical device.
+Subsequent runs can use `npx expo start` and reconnect to the dev client already installed on the
+simulator/device/emulator.
 
 ## Before it's actually usable
 
-1. **Google Cloud OAuth setup** (section 4.2 / FR2) — create a Google Cloud project, enable the
-   Gmail API, create iOS + Android OAuth client IDs (native, PKCE — no client secret), leave the
-   consent screen in "Testing" mode, add yourself as a test user. Paste the client IDs into
-   [`src/services/gmail/authConfig.ts`](src/services/gmail/authConfig.ts).
+1. **Google Cloud OAuth setup** (section 4.2 / FR2) — see [`docs/gmail-setup.md`](docs/gmail-setup.md)
+   for the full walkthrough. Note this app uses `@react-native-google-signin/google-signin` (Google's
+   currently-recommended path for native apps — it deprecated raw custom-URI-scheme redirects), which
+   means **it needs a custom dev client and can't run in plain Expo Go**: `npx expo prebuild` then
+   `npx expo run:ios` / `npx expo run:android`.
 2. **Real sample forwarded messages** — the parser (`src/services/parsing/`) is config-driven
    (`ParsingRule` rows in SQLite) rather than hardcoded per bank, but no rules are seeded yet
    because we don't have real message samples. Once you have a few real forwarded emails from your
@@ -50,7 +55,7 @@ src/
   services/
     fx/                      Frankfurter.dev rate fetching + daily cache + offline fallback (FR13/FR14)
     parsing/                 Config-driven message parser + currency detection (FR6/FR7/FR10)
-    gmail/                   OAuth (PKCE), token storage (Keychain/Keystore), Gmail REST calls, ingestion orchestration
+    gmail/                   Google sign-in, token storage (Keychain/Keystore), Gmail REST calls, ingestion orchestration
   context/AppContext.tsx     App-wide settings + categories, backed by SQLite
   navigation/                Bottom-tab + stack navigation, onboarding gate
   screens/                   onboarding, dashboard, transactions, budgets, settings

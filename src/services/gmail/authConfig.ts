@@ -1,39 +1,54 @@
 /**
- * Google OAuth config for Gmail access (section 4.2 / FR2).
+ * Google OAuth config for Gmail access (section 4.2 / FR2), via
+ * @react-native-google-signin/google-signin.
  *
- * One-time setup (see docs/gmail-setup.md):
- *   1. Create a Google Cloud project.
- *   2. Enable the Gmail API.
- *   3. Create an OAuth client of type "iOS" and one of type "Android" (native
- *      apps use PKCE, not a client secret — that's why there's no secret here).
- *   4. Leave the OAuth consent screen in "Testing" mode (fine for single-user;
- *      skips Google's app-review process) and add your own Google account as
- *      a test user.
- *   5. Paste the generated client IDs below.
+ * Why this library instead of a hand-rolled expo-auth-session/PKCE flow: Google
+ * has deprecated raw custom-URI-scheme redirects for native OAuth clients (flagged
+ * as an app-impersonation risk) and now steers native apps toward its own sign-in
+ * SDKs. This library wraps those SDKs — Google Sign-In on Android, GoogleSignIn
+ * SDK on iOS. The Gmail scope is requested up front via configure({ scopes }), so
+ * signIn() covers both identity and Gmail access, and getTokens() afterward
+ * returns a real, client-usable access token — no backend server, no client
+ * secret embedded in the app.
  *
- * These are safe to keep in the repo (unlike a client secret) — native OAuth
- * clients are identified by ID only, not a secret, and access is still gated
- * by the user consenting in the browser each time.
+ * Caveat (unverified in this environment — no device/emulator was available to
+ * test on): some Android builds of this library have open issues reporting an
+ * empty accessToken from getTokens(). src/services/gmail/useGoogleAuth.ts guards
+ * against this and throws a clear error rather than silently failing — if you
+ * hit it on-device, see docs/gmail-setup.md for the fallback.
+ *
+ * One-time setup (see docs/gmail-setup.md for the full walkthrough):
+ *   1. Create a Google Cloud project; enable the Gmail API.
+ *   2. Create THREE OAuth client IDs in the same project:
+ *        - Web application  → used as `webClientId` below (required by the
+ *          library even though we never use a backend — it's how Android's
+ *          Credential Manager validates the app).
+ *        - iOS              → bundle ID com.budgettracker.app → `iosClientId`.
+ *        - Android           → package com.budgettracker.app + your SHA-1
+ *          signing fingerprint. Not referenced in JS — Google matches it
+ *          server-side against your app's signature.
+ *   3. Leave the OAuth consent screen in "Testing" mode (single-user; skips
+ *      Google's app-review process) and add your own Google account as a test
+ *      user. Add every scope below to the consent screen's scope list.
+ *   4. Paste the Web and iOS client IDs below, and the iOS one (reversed) into
+ *      the `iosUrlScheme` config plugin entry in app.json.
+ *
+ * This module requires a custom dev client — it cannot run inside plain Expo Go
+ * (`npx expo prebuild` then `npx expo run:ios` / `npx expo run:android`).
  */
-export const GOOGLE_OAUTH_CLIENT_ID = {
-  ios: "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com",
-  android: "REPLACE_WITH_ANDROID_CLIENT_ID.apps.googleusercontent.com",
-};
+export const GOOGLE_WEB_CLIENT_ID = "REPLACE_WITH_WEB_CLIENT_ID.apps.googleusercontent.com";
+export const GOOGLE_IOS_CLIENT_ID = "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com";
 
 /**
  * gmail.modify (not just readonly) is required so the app can archive/label
- * messages as processed after parsing (FR9), not just read them.
+ * messages as processed after parsing (FR9), not just read them. Passed into
+ * GoogleSignin.configure({ scopes }) so the initial sign-in consent screen
+ * already covers Gmail access.
  */
 export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
-
-export const GOOGLE_DISCOVERY = {
-  authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-  tokenEndpoint: "https://oauth2.googleapis.com/token",
-  revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-};
 
 /** The Gmail label the app looks for new forwarded transaction emails in. */
 export const INGEST_LABEL_NAME = "INBOX";
