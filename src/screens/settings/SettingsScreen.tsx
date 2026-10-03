@@ -16,9 +16,7 @@ export default function SettingsScreen() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [customCurrency, setCustomCurrency] = useState("");
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
-  const [geminiKeyInput, setGeminiKeyInput] = useState(
-    "AQ.Ab8RN6J07PpC1LYZP1AEwbwiK0oShj0jl-f4-BnqfLp993l96g",
-  );
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [geminiKeyBusy, setGeminiKeyBusy] = useState(false);
 
   useEffect(() => {
