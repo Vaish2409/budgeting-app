@@ -1,9 +1,11 @@
 import { listNewMessages, getMessage, markProcessed } from "./gmailApi";
 import { parseMessage } from "../parsing/messageParser";
+import { resolveCategory } from "../parsing/categorize";
 import { listParsingRules } from "../../db/repositories/parsingRulesRepo";
 import { transactionExistsForMessage, createTransaction } from "../../db/repositories/transactionsRepo";
-import { findCategoryForMerchant } from "../../db/repositories/merchantRulesRepo";
+import { listCategories } from "../../db/repositories/categoriesRepo";
 import { getSettings, updateSettings } from "../../db/repositories/settingsRepo";
+import { loadGeminiKey } from "../ai/geminiKeyStore";
 import { getRateToBase } from "../fx/fxService";
 import { convertMinorUnits } from "../../utils/currency";
 
@@ -13,6 +15,7 @@ export interface IngestionResult {
   skippedDuplicate: number;
   skippedNonTransaction: number;
   skippedNoRule: number;
+  aiUsed: number; // of the imported transactions, how many the Gemini fallback actually resolved
   errors: string[];
 }
 
@@ -30,11 +33,14 @@ export async function pollAndImport(): Promise<IngestionResult> {
     skippedDuplicate: 0,
     skippedNonTransaction: 0,
     skippedNoRule: 0,
+    aiUsed: 0,
     errors: [],
   };
 
   const settings = await getSettings();
   const rules = await listParsingRules();
+  const categories = await listCategories();
+  const geminiKey = await loadGeminiKey();
   const summaries = await listNewMessages(settings.bankSenderAllowlist);
   result.fetched = summaries.length;
 
@@ -61,7 +67,14 @@ export async function pollAndImport(): Promise<IngestionResult> {
       }
 
       const { data } = parsed;
-      const categoryId = data.merchant ? await findCategoryForMerchant(data.merchant) : null;
+      const categorized = await resolveCategory({
+        merchant: data.merchant,
+        rawText: `${message.subject}\n${message.body}`,
+        categories,
+        aiKeyConfigured: !!geminiKey,
+      });
+      const { categoryId, merchant } = categorized;
+      if (categorized.usedAi) result.aiUsed++;
 
       const fx = await getRateToBase(data.currency, settings.baseCurrency);
       const baseAmountMinor = fx
@@ -77,7 +90,7 @@ export async function pollAndImport(): Promise<IngestionResult> {
         originalCurrency: data.currency,
         baseAmountMinor: signedBase,
         fxRateUsed: fx?.rate ?? null,
-        merchant: data.merchant,
+        merchant,
         bankSource: data.bankIdentifier,
         categoryId,
         note: null,

@@ -22,6 +22,17 @@ type RuleAttempt =
   | { kind: "excluded" } // rule explicitly recognized this as a non-transaction (OTP, promo, etc.)
   | { kind: "no_match" }; // this rule just doesn't apply — caller should try the next candidate
 
+// Many bank alerts share this "at <merchant> on <date>" phrasing (e.g. "...at
+// TALABAT*LuLu Hypermark Bahrain BH on 28/08/2026...") regardless of which
+// bank sent them. Used as a fallback below when a rule has no merchantPattern
+// of its own, or that pattern didn't match — so messages from a known sender
+// still surface a merchant name instead of going in blank.
+const GENERIC_MERCHANT_PATTERN = /\bat\s+([A-Za-z0-9][A-Za-z0-9&*'.,\-/ ]{1,60}?)\s+(?:on|dated?)\s+\d/i;
+
+export function extractGenericMerchant(text: string): string | null {
+  return text.match(GENERIC_MERCHANT_PATTERN)?.[1]?.trim() ?? null;
+}
+
 function tryRule(rule: ParsingRule, text: string): RuleAttempt {
   if (rule.isNonTransactionPattern && new RegExp(rule.isNonTransactionPattern, "i").test(text)) {
     return { kind: "excluded" };
@@ -56,6 +67,7 @@ function tryRule(rule: ParsingRule, text: string): RuleAttempt {
     const merchantMatch = text.match(new RegExp(rule.merchantPattern, "i"));
     merchant = merchantMatch?.[1]?.trim() ?? null;
   }
+  if (!merchant) merchant = extractGenericMerchant(text);
 
   let lastFour: string | null = null;
   if (rule.lastFourPattern) {

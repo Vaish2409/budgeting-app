@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, ScrollView, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, Linking } from "react-native";
 import { useApp } from "../../context/AppContext";
 import { useGoogleAuth } from "../../services/gmail/useGoogleAuth";
 import { pollAndImport } from "../../services/gmail/ingestionService";
 import { createCategory, deleteCategory } from "../../db/repositories/categoriesRepo";
+import { saveGeminiKey, loadGeminiKey, clearGeminiKey } from "../../services/ai/geminiKeyStore";
 import { COMMON_CURRENCIES } from "../../constants/currencies";
 
 export default function SettingsScreen() {
@@ -14,6 +15,30 @@ export default function SettingsScreen() {
   const [newSender, setNewSender] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [customCurrency, setCustomCurrency] = useState("");
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const [geminiKeyInput, setGeminiKeyInput] = useState(
+    "AQ.Ab8RN6J07PpC1LYZP1AEwbwiK0oShj0jl-f4-BnqfLp993l96g",
+  );
+  const [geminiKeyBusy, setGeminiKeyBusy] = useState(false);
+
+  useEffect(() => {
+    loadGeminiKey().then((key) => setHasGeminiKey(!!key));
+  }, []);
+
+  async function handleSaveGeminiKey() {
+    const value = geminiKeyInput.trim();
+    if (!value) return;
+    setGeminiKeyBusy(true);
+    await saveGeminiKey(value);
+    setHasGeminiKey(true);
+    setGeminiKeyInput("");
+    setGeminiKeyBusy(false);
+  }
+
+  async function handleRemoveGeminiKey() {
+    await clearGeminiKey();
+    setHasGeminiKey(false);
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -22,6 +47,7 @@ export default function SettingsScreen() {
       const result = await pollAndImport();
       setSyncMessage(
         `Imported ${result.imported} of ${result.fetched} messages` +
+          (result.aiUsed ? `, AI fallback used for ${result.aiUsed}` : "") +
           (result.errors.length ? ` (${result.errors.length} errors)` : "")
       );
     } catch (err: any) {
@@ -193,6 +219,39 @@ export default function SettingsScreen() {
           <Text style={styles.smallButtonText}>Add</Text>
         </Pressable>
       </View>
+
+      <Text style={styles.sectionTitle}>AI-assisted categorization</Text>
+      <Text style={styles.sectionSubtitle}>
+        When a Gemini key is set, transactions the parsing rules and keyword list can't fully
+        resolve are additionally sent (with card digits and credit-limit numbers stripped out
+        first) to Google's Gemini API as a fallback. Nothing is sent, and nothing changes, if no
+        key is configured.
+      </Text>
+      {hasGeminiKey ? (
+        <View>
+          <Text style={styles.connectedText}>✅ Gemini key saved</Text>
+          <Pressable style={styles.secondaryButton} onPress={handleRemoveGeminiKey}>
+            <Text style={styles.secondaryButtonText}>Remove key</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.inlineRow}>
+          <TextInput
+            style={styles.inlineInput}
+            placeholder="Gemini API key"
+            autoCapitalize="none"
+            secureTextEntry
+            value={geminiKeyInput}
+            onChangeText={setGeminiKeyInput}
+          />
+          <Pressable style={styles.smallButton} onPress={handleSaveGeminiKey} disabled={geminiKeyBusy}>
+            <Text style={styles.smallButtonText}>Save</Text>
+          </Pressable>
+        </View>
+      )}
+      <Pressable onPress={() => Linking.openURL("https://aistudio.google.com/apikey")}>
+        <Text style={styles.linkText}>Get a free key at aistudio.google.com/apikey</Text>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -231,6 +290,7 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: "#333", fontWeight: "600" },
   connectedText: { color: "#2E7D32", fontWeight: "600", marginBottom: 8 },
+  linkText: { color: "#1A73E8", fontSize: 12, marginTop: 8 },
   errorText: { color: "#E53935", marginTop: 8, fontSize: 12 },
   syncMessage: { marginTop: 8, fontSize: 12, color: "#666" },
   listRow: {
